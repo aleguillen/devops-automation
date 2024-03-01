@@ -85,7 +85,7 @@ foreach ($organization in $organizations) {
     if ($reportType -eq 1 -or $reportType -eq 3) {
         $agentPools = (Invoke-RestMethod -Uri "$($orgBaseUrl)_apis/distributedtask/pools?api-version=7.0" -Headers $headers -Method Get).value
         Write-Host "Total Agent Pools: $($agentPools.Length)"
-        $agentPools | ft id, name, size, isHosted, createdOn -AutoSize
+        $agentPools | Format-Table id, name, size, isHosted, createdOn -AutoSize
         Export-DataToCsv -inputObject $agentPools
     
         $allPoolAgents = @()
@@ -93,7 +93,7 @@ foreach ($organization in $organizations) {
             Write-Host "Agent Pool: $($agentPool.name) | Auto Provision: $($agentPool.autoProvision)"
             $poolAgents = (Invoke-RestMethod -Uri "$($orgBaseUrl)_apis/distributedtask/pools/$($agentPool.id)/agents?includeCapabilities=true&api-version=7.0" -Headers $headers -Method Get).value
         
-            $poolAgents | foreach {
+            $poolAgents | ForEach-Object {
                 $_ | Add-Member -MemberType NoteProperty -Name "poolName" -Value $agentPool.name
                 $_ | Add-Member -MemberType NoteProperty -Name "poolAutoProvision" -Value $agentPool.autoProvision
                 $_ | Add-Member -MemberType NoteProperty -Name "poolAutoUpdate" -Value $agentPool.autoProvision
@@ -115,7 +115,7 @@ foreach ($organization in $organizations) {
             $allPoolAgents += $poolAgents
         }
         Write-Host "Total Agents: $($allPoolAgents.Length)"
-        $allPoolAgents | ft id, name, version, osDescription, enabled, provisioningState -AutoSize
+        $allPoolAgents | Format-Table id, name, version, osDescription, enabled, provisioningState -AutoSize
         Export-DataToCsv -inputObject $allPoolAgents
     }
     # Get Projects Information
@@ -133,13 +133,13 @@ foreach ($organization in $organizations) {
             $project | Add-Member -MemberType NoteProperty -Name "sourceControlType" -Value $projectDetails.capabilities.versioncontrol.sourceControlType
             $project | Add-Member -MemberType NoteProperty -Name "gitEnabled" -Value $projectDetails.capabilities.versioncontrol.gitEnabled
             $project | Add-Member -MemberType NoteProperty -Name "tfvcEnabled" -Value $projectDetails.capabilities.versioncontrol.tfvcEnabled
-            $projectProperties | foreach {
+            $projectProperties | ForEach-Object {
                 $project | Add-Member -MemberType NoteProperty -Name $_.name -Value $_.value
             }
         }
 
         Write-Host "Total Projects: $($projects.Length)"
-        $projects | ft id, name, state, visibility, description -AutoSize
+        $projects | Format-Table id, name, state, visibility, description -AutoSize
         Export-DataToCsv -inputObject $projects
     }
 }
