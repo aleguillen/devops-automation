@@ -1,6 +1,26 @@
 # Description: This script retrieves all the projects and agent pools from all the organizations the current user is a member of.
 # Author: Alejandra Guillen
 
+# Parameters:
+# -forceCSVExport: If set, the script will export the data to a CSV file without prompting the user
+# -directoryPath: The directory path to save the reports. Default is ".\reports"
+
+# Prerequisites:
+# 1. Install Azure CLI. See https://docs.microsoft.com/en-us/cli/azure/install-azure-cli
+
+# How to use:
+# 1. Run the script using PowerShell
+# 2. The script will prompt you to login to Azure CLI if you haven't done it before
+# 3. The script will prompt you to select an organization
+# 4. The script will prompt you to select the report to generate (Projects, Agent Pools, or Both)
+# 5. The script will generate a CSV file with the report for each organization and a summary report for all organizations
+
+# Example:
+#> .\reporting-scripts\get-multi-org-report.ps1
+
+# Example with parameters:
+#> .\reporting-scripts\get-multi-org-report.ps1 -forceCSVExport -directoryPath ".\reports"
+
 param(
     [switch] $forceCSVExport,
     
@@ -90,6 +110,11 @@ Write-Host "2: Agent Pools"
 Write-Host "0: Both"
 [int]$reportType = Read-Host "Enter the number of the report" -ErrorAction Stop
 
+$organizationsArray = @()
+$allProjectsArray = @()
+$allAgentsArray = @()
+$allAgentPoolsArray = @()
+
 foreach ($organization in $organizations) {
     $orgBaseUrl = $organization.accountUri.Replace("vssps.", "")
     Write-Host -ForegroundColor Cyan "Organization: $($organization.accountName) - $orgBaseUrl"
@@ -122,29 +147,27 @@ foreach ($organization in $organizations) {
              $project | Add-Member -MemberType NoteProperty -Name "organizationUrl" -Value $organization.accountUri
              $project | Add-Member -MemberType NoteProperty -Name "organizationId" -Value $organization.accountId
          }
- 
-         $organization | Add-Member -MemberType NoteProperty -Name "projects" -Value $projects
- 
+          
          Write-Host " - Projects:"
          $projects | Format-Table id, name, state, visibility, description -AutoSize
          if ($projects.Length -gt 0) {
              Export-DataToCsv -inputObject $projects -fileName "$($organization.accountName)-projects"
          }
          Write-Host  -ForegroundColor Blue " - Total Projects: $($projects.Length)"
+
+         $allProjectsArray += $projects
      }
 
     # Get Agent Pools Information
     if ($reportType -eq 2 -or $reportType -eq 0) {
         $agentPools = (Invoke-RestMethod -Uri "$($orgBaseUrl)_apis/distributedtask/pools?api-version=7.0" -Headers $headers -Method Get).value
-        Write-Host " - Agent Pools: "
-        $agentPools | Format-Table id, name, size, isHosted, createdOn -AutoSize
-        if ($agentPools.Length -gt 0) {
-            Export-DataToCsv -inputObject $agentPools -fileName "$($organization.accountName)-agent_pools"
-        }
-        Write-Host -ForegroundColor Blue " - Total Agent Pools: $($agentPools.Length)"
-    
+            
         $allPoolAgents = @()
         foreach ($agentPool in $agentPools) {
+            $agentPool | Add-Member -MemberType NoteProperty -Name "organizationName" -Value $organization.accountName
+            $agentPool | Add-Member -MemberType NoteProperty -Name "organizationUrl" -Value $organization.accountUri
+            $agentPool | Add-Member -MemberType NoteProperty -Name "organizationId" -Value $organization.accountId
+
             $poolAgents = (Invoke-RestMethod -Uri "$($orgBaseUrl)_apis/distributedtask/pools/$($agentPool.id)/agents?includeCapabilities=true&api-version=7.0" -Headers $headers -Method Get).value
         
             $poolAgents | ForEach-Object {
@@ -163,28 +186,45 @@ foreach ($organization in $organizations) {
                 $_ | Add-Member -MemberType NoteProperty -Name "poolStatus" -Value $agentPool.status
                 $_ | Add-Member -MemberType NoteProperty -Name "poolSize" -Value $agentPool.size
                 $_ | Add-Member -MemberType NoteProperty -Name "poolOptions" -Value $agentPool.options
-                $_ | Add-Member -MemberType NoteProperty -Name "poolScope" -Value $agentPool.scope
+                $_ | Add-Member -MemberType NoteProperty -Name "poolScope" -Value $agentPool.scope                
+                $_ | Add-Member -MemberType NoteProperty -Name "organizationName" -Value $organization.accountName
+                $_ | Add-Member -MemberType NoteProperty -Name "organizationUrl" -Value $organization.accountUri
+                $_ | Add-Member -MemberType NoteProperty -Name "organizationId" -Value $organization.accountId
             }
 
             $allPoolAgents += $poolAgents
         }
-        
-        $organization | Add-Member -MemberType NoteProperty -Name "agentPool" -Value $agentPools
-        $organization | Add-Member -MemberType NoteProperty -Name "agents" -Value $allPoolAgents
+
+        Write-Host " - Agent Pools: "
+        $agentPools | Format-Table id, name, size, isHosted, createdOn -AutoSize
+        if ($agentPools.Length -gt 0) {
+            Export-DataToCsv -inputObject $agentPools -fileName "$($organization.accountName)-agent_pools"
+        }
+        Write-Host -ForegroundColor Blue " - Total Agent Pools: $($agentPools.Length)"
+
         Write-Host " - Agents: "
         $allPoolAgents | Format-Table id, name, version, osDescription, enabled, provisioningState -AutoSize
         if ($allPoolAgents.Length -gt 0) {
             Export-DataToCsv -inputObject $allPoolAgents -fileName "$($organization.accountName)-agents"
         }
         Write-Host  -ForegroundColor Blue " - Total Agents: $($allPoolAgents.Length)"
+
+        $allAgentPoolsArray += $agentPools
+        $allAgentsArray += $allPoolAgents
+    }
+
+    $organizationsArray += $organization
+}
+
+Write-Host " - Organizations Reported:"
+$organizationsArray | Format-Table accountName,accountUri -AutoSize
+if ($organizationsArray.Length -gt 0) {
+    if ($reportType -eq 1 -or $reportType -eq 0) {
+        Export-DataToCsv -inputObject $allProjectsArray -fileName "all-organization-projects"
+    }
+    if ($reportType -eq 2 -or $reportType -eq 0) {
+        Export-DataToCsv -inputObject $allAgentPoolsArray -fileName "all-organization-agent_pools"
+        Export-DataToCsv -inputObject $allAgentsArray -fileName "all-organization-agents"
     }
 }
-
-Write-Host " - Organizations:"
-$organizations | Format-Table accountName,accountUri -AutoSize
-if ($organizations.Length -gt 0) {
-    Export-DataToCsv -inputObject $organizations -fileName "all-organizations"
-}
-Write-Host  -ForegroundColor Blue " - Total Organizations: $($organizations.Length)"
-
-
+Write-Host  -ForegroundColor Blue " - Total Organizations Reported: $($organizationsArray.Length)"
