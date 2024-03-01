@@ -1,10 +1,22 @@
 # Description: This script retrieves all the projects and agent pools from all the organizations the current user is a member of.
 # Author: Alejandra Guillen
 
+param(
+    [switch] $forceCSVExport,
+    
+    [string] $directoryPath = ".\reports" 
+)
+
+$ErrorActionPreference = "Stop"
+
+if (-not (Test-Path -Path $directoryPath)) {
+    New-Item -ItemType Directory -Path $directoryPath
+}
+
 #region Functions
 function Export-DataToCsv {
     param (
-        [string] $path,
+        [string] $fileName,
         [object] $inputObject,
         [switch] $append,
         [string] $delimiter = ","
@@ -12,22 +24,24 @@ function Export-DataToCsv {
     )
       
     # Prompt user to export the data to a CSV file
-    $export = Read-Host "Do you want to export the data to a CSV file? (Y/N)"
+    if ($forceCSVExport) {
+        $export = "Y"
+    }
+    else {
+        $export = Read-Host "Do you want to export the data to a CSV file? (Y/N)"
+    }
+    
     if ($export.ToLower() -eq "y") {
-        if ([string]::IsNullOrEmpty($path)) {
-            $path = Read-Host "Enter the path to the CSV file. Ex. C:\temp\output.csv"
-        }
-        else {
-            Write-Host "Exporting data to $path"
-        }
+        
+        $filePath = $directoryPath + "\" + $fileName + "-" + (Get-Date).ToString("yyyy-MM-dd") + ".csv"
 
         if ($append) {
-            $inputObject | Export-Csv -Path $path -Append -Delimiter $delimiter -NoTypeInformation
+            $inputObject | Export-Csv -Path $filePath -Append -Delimiter $delimiter -NoTypeInformation
         }
         else {
-            $inputObject | Export-Csv -Path $path -Delimiter $delimiter -NoTypeInformation
+            $inputObject | Export-Csv -Path $filePath -Delimiter $delimiter -NoTypeInformation
         }
-        Write-Host "Data exported to $path"
+        Write-Host -ForegroundColor Green "  [info] - Data exported to $filePath"
     }
 }
 #endregion
@@ -71,26 +85,66 @@ else {
 
 # Prompt user to select if want to report agent pools or projects
 Write-Host "Select the report to generate:"
-Write-Host "1: Agent Pools"
-Write-Host "2: Projects"
-Write-Host "3: Both"
+Write-Host "1: Projects"
+Write-Host "2: Agent Pools"
+Write-Host "0: Both"
 [int]$reportType = Read-Host "Enter the number of the report" -ErrorAction Stop
-
 
 foreach ($organization in $organizations) {
     $orgBaseUrl = $organization.accountUri.Replace("vssps.", "")
-    Write-Host "Organization: $($organization.accountName) - $orgBaseUrl"
+    Write-Host -ForegroundColor Cyan "Organization: $($organization.accountName) - $orgBaseUrl"
+    try {
+        $checkOrg = Invoke-RestMethod -Uri "$($orgBaseUrl)_apis/projects?`$top=5&api-version=7.0" -Headers $headers -Method Get
+    }
+    catch {
+        Write-Host -ForegroundColor Red "  [error] - Error retrieving organization details: $($_.Exception.Message)"
+        continue
+    }    
+
+    # Get Projects Information
+    if ($reportType -eq 1 -or $reportType -eq 0) {
+        $projects = (Invoke-RestMethod -Uri "$($orgBaseUrl)_apis/projects?api-version=7.0" -Headers $headers -Method Get).value
+     
+         foreach ($project in $projects) {
+             $projectDetails = Invoke-RestMethod -Uri "$($project.url)?includeCapabilities=true&api-version=7.0" -Headers $headers -Method Get
+             $projectProperties = (Invoke-RestMethod -Uri "$($project.url)/properties?api-version=7.0-preview.1" -Headers $headers -Method Get).value
+ 
+             $project | Add-Member -MemberType NoteProperty -Name "capabilities" -Value $projectDetails.capabilities
+             $project | Add-Member -MemberType NoteProperty -Name "defaultTeam" -Value $projectDetails.defaultTeam.name
+             $project | Add-Member -MemberType NoteProperty -Name "process" -Value $projectDetails.capabilities.processTemplate.templateName
+             $project | Add-Member -MemberType NoteProperty -Name "sourceControlType" -Value $projectDetails.capabilities.versioncontrol.sourceControlType
+             $project | Add-Member -MemberType NoteProperty -Name "gitEnabled" -Value $projectDetails.capabilities.versioncontrol.gitEnabled
+             $project | Add-Member -MemberType NoteProperty -Name "tfvcEnabled" -Value $projectDetails.capabilities.versioncontrol.tfvcEnabled
+             $projectProperties | ForEach-Object {
+                 $project | Add-Member -MemberType NoteProperty -Name $_.name -Value $_.value
+             }
+             $project | Add-Member -MemberType NoteProperty -Name "organizationName" -Value $organization.accountName
+             $project | Add-Member -MemberType NoteProperty -Name "organizationUrl" -Value $organization.accountUri
+             $project | Add-Member -MemberType NoteProperty -Name "organizationId" -Value $organization.accountId
+         }
+ 
+         $organization | Add-Member -MemberType NoteProperty -Name "projects" -Value $projects
+ 
+         Write-Host " - Projects:"
+         $projects | Format-Table id, name, state, visibility, description -AutoSize
+         if ($projects.Length -gt 0) {
+             Export-DataToCsv -inputObject $projects -fileName "$($organization.accountName)-projects"
+         }
+         Write-Host  -ForegroundColor Blue " - Total Projects: $($projects.Length)"
+     }
 
     # Get Agent Pools Information
-    if ($reportType -eq 1 -or $reportType -eq 3) {
+    if ($reportType -eq 2 -or $reportType -eq 0) {
         $agentPools = (Invoke-RestMethod -Uri "$($orgBaseUrl)_apis/distributedtask/pools?api-version=7.0" -Headers $headers -Method Get).value
-        Write-Host "Total Agent Pools: $($agentPools.Length)"
+        Write-Host " - Agent Pools: "
         $agentPools | Format-Table id, name, size, isHosted, createdOn -AutoSize
-        Export-DataToCsv -inputObject $agentPools
+        if ($agentPools.Length -gt 0) {
+            Export-DataToCsv -inputObject $agentPools -fileName "$($organization.accountName)-agent_pools"
+        }
+        Write-Host -ForegroundColor Blue " - Total Agent Pools: $($agentPools.Length)"
     
         $allPoolAgents = @()
         foreach ($agentPool in $agentPools) {
-            Write-Host "Agent Pool: $($agentPool.name) | Auto Provision: $($agentPool.autoProvision)"
             $poolAgents = (Invoke-RestMethod -Uri "$($orgBaseUrl)_apis/distributedtask/pools/$($agentPool.id)/agents?includeCapabilities=true&api-version=7.0" -Headers $headers -Method Get).value
         
             $poolAgents | ForEach-Object {
@@ -114,34 +168,23 @@ foreach ($organization in $organizations) {
 
             $allPoolAgents += $poolAgents
         }
-        Write-Host "Total Agents: $($allPoolAgents.Length)"
+        
+        $organization | Add-Member -MemberType NoteProperty -Name "agentPool" -Value $agentPools
+        $organization | Add-Member -MemberType NoteProperty -Name "agents" -Value $allPoolAgents
+        Write-Host " - Agents: "
         $allPoolAgents | Format-Table id, name, version, osDescription, enabled, provisioningState -AutoSize
-        Export-DataToCsv -inputObject $allPoolAgents
-    }
-    # Get Projects Information
-    if ($reportType -eq 2 -or $reportType -eq 3) {
-
-       $projects = (Invoke-RestMethod -Uri "$($orgBaseUrl)_apis/projects?api-version=7.0" -Headers $headers -Method Get).value
-    
-        foreach ($project in $projects) {
-            $projectDetails = Invoke-RestMethod -Uri "$($project.url)?includeCapabilities=true&api-version=7.0" -Headers $headers -Method Get
-            $projectProperties = (Invoke-RestMethod -Uri "$($project.url)/properties?api-version=7.0-preview.1" -Headers $headers -Method Get).value
-
-            $project | Add-Member -MemberType NoteProperty -Name "capabilities" -Value $projectDetails.capabilities
-            $project | Add-Member -MemberType NoteProperty -Name "defaultTeam" -Value $projectDetails.defaultTeam.name
-            $project | Add-Member -MemberType NoteProperty -Name "process" -Value $projectDetails.capabilities.processTemplate.templateName
-            $project | Add-Member -MemberType NoteProperty -Name "sourceControlType" -Value $projectDetails.capabilities.versioncontrol.sourceControlType
-            $project | Add-Member -MemberType NoteProperty -Name "gitEnabled" -Value $projectDetails.capabilities.versioncontrol.gitEnabled
-            $project | Add-Member -MemberType NoteProperty -Name "tfvcEnabled" -Value $projectDetails.capabilities.versioncontrol.tfvcEnabled
-            $projectProperties | ForEach-Object {
-                $project | Add-Member -MemberType NoteProperty -Name $_.name -Value $_.value
-            }
+        if ($allPoolAgents.Length -gt 0) {
+            Export-DataToCsv -inputObject $allPoolAgents -fileName "$($organization.accountName)-agents"
         }
-
-        Write-Host "Total Projects: $($projects.Length)"
-        $projects | Format-Table id, name, state, visibility, description -AutoSize
-        Export-DataToCsv -inputObject $projects
+        Write-Host  -ForegroundColor Blue " - Total Agents: $($allPoolAgents.Length)"
     }
 }
+
+Write-Host " - Organizations:"
+$organizations | Format-Table accountName,accountUri -AutoSize
+if ($organizations.Length -gt 0) {
+    Export-DataToCsv -inputObject $organizations -fileName "all-organizations"
+}
+Write-Host  -ForegroundColor Blue " - Total Organizations: $($organizations.Length)"
 
 
