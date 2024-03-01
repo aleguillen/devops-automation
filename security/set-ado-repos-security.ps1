@@ -84,17 +84,17 @@ if ([string]::IsNullOrEmpty($repoStartsWith)) {
     $repos = $repos | Where-Object { $_.name -like "$repoStartsWith*" }
 } 
 
-$securityNamespaceId = "2e9eb7ed-3c0a-47d4-87c1-0ffdd275fd87" # Git Repositories
+$securityNamespaceId = "2e9eb7ed-3c0a-47d4-87c1-0ffdd275fd87" # This is the Security Namespace for 'Git Repositories' - See: https://learn.microsoft.com/en-us/azure/devops/organizations/security/namespace-reference?view=azure-devops
 $securityNamespace = (Invoke-RestMethod -Uri "$($orgBaseUrl)_apis/securitynamespaces/$($securityNamespaceId)?api-version=7.2-preview.1" -Headers $headers -Method Get).value
-#$securityNamespace.actions | format-table -Property bit, name, displayName -AutoSize
+#$securityNamespace.actions | format-table -Property bit, name, displayName -AutoSize 
 
 # Prompt user to select one or more security actions
 Write-Host "`nSelect one or more security actions for ALLOW:"
 for ($i = 0; $i -lt $securityNamespace.actions.Length; $i++) {
-    Write-Host "$($i+1): $($securityNamespace.actions[$i].name) - $($securityNamespace.actions[$i].displayName) "
+    Write-Host "$($i+1): $($securityNamespace.actions[$i].name) - $($securityNamespace.actions[$i].displayName)"
 }
 [array]$securityActions = (Read-Host "Enter the number(s) of the security action(s) comma separated" -ErrorAction Stop).Trim().Split(",")
-$allowActions = $securityNamespace.actions | ? { $securityActions -contains ($securityNamespace.actions.IndexOf($_) + 1) }
+$allowActions = $securityNamespace.actions | Where-Object { $securityActions -contains ($securityNamespace.actions.IndexOf($_) + 1) }
 
 Write-Host "`nSelect one or more security actions for DENY:"
 for ($i = 0; $i -lt $securityNamespace.actions.Length; $i++) {
@@ -105,7 +105,7 @@ $denyActions = $securityNamespace.actions | Where-Object { $securityActions -con
 
 foreach ($repo in $repos) {
     # Set Access Control Entries (ACEs) on a Git repository.
-    # Get the security namespace ID from: https://learn.microsoft.com/en-us/azure/devops/organizations/security/namespace-reference?view=azure-devops
+    # Set the repository token format from doc: https://learn.microsoft.com/en-us/azure/devops/organizations/security/namespace-reference?view=azure-devops
     $repoToken = "repoV2/$($repo.project.id)/$($repo.id)"
     
     $body = @{
@@ -117,14 +117,14 @@ foreach ($repo in $repos) {
     foreach ($team in $selectedTeams) {
 
         Write-Host "`nUpdating security settings for $($repo.name) for team $($team.name)..."
-        Write-Host " - Current security settings for $($repo.name) for team $($team.name):"
-        $currentTeamACLs = (Invoke-RestMethod -Uri "$($orgBaseUrl)_apis/accesscontrollists/$($securityNamespaceId)?token=$($repoToken)&descriptors=$($team.identity.descriptor)&includeExtendedInfo=true&recurse=true&api-version=7.2-preview.1" -Headers $headers -Method Get).value
+        # Write-Host " - Current security settings for $($repo.name) for team $($team.name):"
+        # $currentTeamACLs = (Invoke-RestMethod -Uri "$($orgBaseUrl)_apis/accesscontrollists/$($securityNamespaceId)?token=$($repoToken)&descriptors=$($team.identity.descriptor)&includeExtendedInfo=true&recurse=true&api-version=7.2-preview.1" -Headers $headers -Method Get).value
         
-        $dictionary = @{}
-        $currentTeamACLs.acesDictionary | Get-Member -MemberType NoteProperty | ForEach-Object {
-            $dictionary[$_.Name] = $currentTeamACLs.acesDictionary.$($_.Name)
-        }
-        $dictionary.Values | Format-Table -Property * -AutoSize
+        # $dictionary = @{}
+        # $currentTeamACLs.acesDictionary | Get-Member -MemberType NoteProperty | ForEach-Object {
+        #     $dictionary[$_.Name] = $currentTeamACLs.acesDictionary.$($_.Name)
+        # }
+        # $dictionary.Values | Format-Table -Property * -AutoSize
         
         $body.accessControlEntries += @{
             descriptor = $team.identity.descriptor
@@ -136,15 +136,17 @@ foreach ($repo in $repos) {
         $aces = Invoke-WebRequest -Uri "$($orgBaseUrl)_apis/accesscontrolentries/$($securityNamespaceId)?api-version=7.2-preview.1" -Headers $headers -Method Post -Body ($body | ConvertTo-Json) -ContentType "application/json" 
 
         Write-Host " - New security settings for $($repo.name) for team $($team.name) updated successfully:"
-        $currentTeamACLs = (Invoke-RestMethod -Uri "$($orgBaseUrl)_apis/accesscontrollists/$($securityNamespaceId)?token=$($repoToken)&descriptors=$($team.identity.descriptor)&includeExtendedInfo=true&recurse=true&api-version=7.2-preview.1" -Headers $headers -Method Get).value
+        # $currentTeamACLs = (Invoke-RestMethod -Uri "$($orgBaseUrl)_apis/accesscontrollists/$($securityNamespaceId)?token=$($repoToken)&descriptors=$($team.identity.descriptor)&includeExtendedInfo=true&recurse=true&api-version=7.2-preview.1" -Headers $headers -Method Get).value
         
-        $dictionary = @{}
-        $currentTeamACLs.acesDictionary | Get-Member -MemberType NoteProperty | ForEach-Object {
-            $dictionary[$_.Name] = $currentTeamACLs.acesDictionary.$($_.Name)
-        }
-        $dictionary.Values | Format-Table -Property * -AutoSize
+        # $dictionary = @{}
+        # $currentTeamACLs.acesDictionary | Get-Member -MemberType NoteProperty | ForEach-Object {
+        #     $dictionary[$_.Name] = $currentTeamACLs.acesDictionary.$($_.Name)
+        # }
+        # $dictionary.Values | Format-Table -Property * -AutoSize
         
         # Clear the accessControlEntries array for the next team
         $body.accessControlEntries = @() 
     }
 }
+
+Write-Host "`nSecurity settings updated successfully for the selected repositories and teams." -ForegroundColor Green
