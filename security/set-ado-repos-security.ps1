@@ -76,6 +76,18 @@ for ($i = 0; $i -lt $teams.Length; $i++) {
 [array]$teamIndexes = (Read-Host "Enter the number(s) of the team(s) comma separated" -ErrorAction Stop).Trim().Split(",")
 $selectedTeams = $teams | Where-Object { $teamIndexes -contains ($teams.IndexOf($_) + 1) }
 
+# Retrieve Groups for the selected organization
+$groups = (Invoke-RestMethod -Uri "$($organization.accountUri)_apis/graph/groups?api-version=7.2-preview.1" -Headers $headers -Method Get).value
+$projectGroups = $groups | Where-Object { $_.domain -like "*$($project.id)" }
+
+# Prompt user to select one or more groups
+Write-Host "`nSelect one or more groups:"
+for ($i = 0; $i -lt $projectGroups.Length; $i++) {
+    Write-Host "$($i+1): $($projectGroups[$i].displayName)"
+}
+[array]$groupIndexes = (Read-Host "Enter the number(s) of the groups(s) comma separated" -ErrorAction Stop).Trim().Split(",")
+$selectedGroups = $projectGroups | Where-Object { $groupIndexes -contains ($projectGroups.IndexOf($_) + 1) }
+
 # Retreive Azure Repositories for the selected organization
 $repos = (Invoke-RestMethod -Uri "$($orgBaseUrl)$($project.id)/_apis/git/repositories?api-version=7.2-preview.1" -Headers $headers -Method Get).value
 $repos | format-table -Property name, webUrl -AutoSize
@@ -135,7 +147,7 @@ foreach ($repo in $repos) {
         # Set the access control entries for the repository
         $aces = Invoke-WebRequest -Uri "$($orgBaseUrl)_apis/accesscontrolentries/$($securityNamespaceId)?api-version=7.2-preview.1" -Headers $headers -Method Post -Body ($body | ConvertTo-Json) -ContentType "application/json" 
 
-        Write-Host " - New security settings for $($repo.name) for team $($team.name) updated successfully:"
+        Write-Host " - New security settings for $($repo.name) for team $($team.name) updated successfully."
         # $currentTeamACLs = (Invoke-RestMethod -Uri "$($orgBaseUrl)_apis/accesscontrollists/$($securityNamespaceId)?token=$($repoToken)&descriptors=$($team.identity.descriptor)&includeExtendedInfo=true&recurse=true&api-version=7.2-preview.1" -Headers $headers -Method Get).value
         
         # $dictionary = @{}
@@ -147,6 +159,28 @@ foreach ($repo in $repos) {
         # Clear the accessControlEntries array for the next team
         $body.accessControlEntries = @() 
     }
+    
+    foreach ($group in $selectedGroups) {
+
+        Write-Host "`nUpdating security settings for $($repo.name) for group $($group.name)..."
+        #Getting the group identity for descriptor
+        $groupIdentity = (Invoke-RestMethod -Uri "$($organization.accountUri)_apis/identities?subjectDescriptors=$($group.descriptor)&api-version=7.2-preview.1" -Headers $headers -Method Get).value
+         
+        $body.accessControlEntries += @{
+            descriptor = $groupIdentity.descriptor
+            allow      = $allowActions | ForEach-Object { $_.bit } | Measure-Object -Sum | Select-Object -ExpandProperty Sum
+            deny       = $denyActions | ForEach-Object { $_.bit } | Measure-Object -Sum | Select-Object -ExpandProperty Sum
+        }
+        
+        # Set the access control entries for the repository
+        $aces = Invoke-WebRequest -Uri "$($orgBaseUrl)_apis/accesscontrolentries/$($securityNamespaceId)?api-version=7.2-preview.1" -Headers $headers -Method Post -Body ($body | ConvertTo-Json) -ContentType "application/json" 
+
+        Write-Host " - New security settings for $($repo.name) for group $($group.name) updated successfully."
+        # Clear the accessControlEntries array for the next team
+        $body.accessControlEntries = @() 
+    }
 }
 
 Write-Host "`nSecurity settings updated successfully for the selected repositories and teams." -ForegroundColor Green
+
+
