@@ -33,55 +33,12 @@ if (-not (Test-Path -Path $directoryPath)) {
     New-Item -ItemType Directory -Path $directoryPath
 }
 
-#region Functions
-function Export-DataToCsv {
-    param (
-        [string] $fileName,
-        [object] $inputObject,
-        [switch] $append,
-        [string] $delimiter = ","
-
-    )
-      
-    # Prompt user to export the data to a CSV file
-    if ($forceCSVExport) {
-        $export = "Y"
-    }
-    else {
-        $export = Read-Host "Do you want to export the data to a CSV file? (Y/N)"
-    }
-    
-    if ($export.ToLower() -eq "y") {
-        
-        $filePath = $directoryPath + "\" + $fileName + "-" + (Get-Date).ToString("yyyy-MM-dd") + ".csv"
-
-        if ($append) {
-            $inputObject | Export-Csv -Path $filePath -Append -Delimiter $delimiter -NoTypeInformation
-        }
-        else {
-            $inputObject | Export-Csv -Path $filePath -Delimiter $delimiter -NoTypeInformation
-        }
-        Write-Host -ForegroundColor Green "  [info] - Data exported to $filePath"
-    }
-}
+#region Importing Functions
+Import-Module ../utils/functions.ps1 -Force
 #endregion
 
-# Prompt user if needs to login to Azure CLI
-# Using Azure CLI to retrieve access account
-# To Install Azure CLI see https://docs.microsoft.com/en-us/cli/azure/install-azure-cli
-
-$login = Read-Host "Do you need to login to Azure CLI? (Y/N)"
-if ($login.ToLower() -eq "y") {
-    Write-Host "Login to Azure CLI"
-    az login
-}
-
-# Retrieve the access token
-$token = $(az account get-access-token --query accessToken --output tsv)
-
-# Define Headers for the REST API request
-$headers = @{ Authorization = "Bearer $token"; "Content-Type" = "application/json" }
-
+# Get Azure Authentication headers 
+$headers = Login-AzureCLI 
 # Get the current user's profile
 $currentProfile = Invoke-RestMethod -Uri "https://app.vssps.visualstudio.com/_apis/profile/profiles/me?api-version=7.0" -Headers $headers -Method Get 
 

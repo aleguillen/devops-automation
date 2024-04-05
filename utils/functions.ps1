@@ -11,6 +11,10 @@ Write-Host "Loading functions..."
 
 function Login-AzureCLI {
 
+    # Prompt user if needs to login to Azure CLI
+    # Using Azure CLI to retrieve access account
+    # To Install Azure CLI see https://docs.microsoft.com/en-us/cli/azure/install-azure-cli
+
     $login = Read-Host "`nDo you need to login to Azure CLI? (Y/N)"
     if ($login.ToLower() -eq "y") {
         Write-Host "Login to Azure CLI"

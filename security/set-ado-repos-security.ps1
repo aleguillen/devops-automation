@@ -26,17 +26,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$login = Read-Host "`nDo you need to login to Azure CLI? (Y/N)"
-if ($login.ToLower() -eq "y") {
-    Write-Host "Login to Azure CLI"
-    az login
-}
+#region Importing Functions
+Import-Module ../utils/functions.ps1 -Force
+#endregion
 
-# Retrieve the access token
-$token = $(az account get-access-token --query accessToken --output tsv)
-
-# Define Headers for the REST API request
-$headers = @{ Authorization = "Bearer $token"; "Content-Type" = "application/json" }
+# Get Azure Authentication headers 
+$headers = Login-AzureCLI 
 
 # Get the current user's profile
 $currentProfile = Invoke-RestMethod -Uri "https://app.vssps.visualstudio.com/_apis/profile/profiles/me?api-version=7.0" -Headers $headers -Method Get 
@@ -79,6 +74,9 @@ $selectedTeams = $teams | Where-Object { $teamIndexes -contains ($teams.IndexOf(
 # Retrieve Groups for the selected organization
 $groups = (Invoke-RestMethod -Uri "$($organization.accountUri)_apis/graph/groups?api-version=7.2-preview.1" -Headers $headers -Method Get).value
 $projectGroups = $groups | Where-Object { $_.domain -like "*$($project.id)" }
+$projectGroups | ForEach-Object { 
+    $_ | Add-Member -MemberType NoteProperty -Name 'identityDescriptor' -Value (Invoke-RestMethod -Uri "$($organization.accountUri)_apis/identities?subjectDescriptors=$($_.descriptor)&api-version=7.2-preview.1" -Headers $headers -Method Get).value.descriptor
+}
 
 # Prompt user to select one or more groups
 Write-Host "`nSelect one or more groups:"
@@ -163,11 +161,9 @@ foreach ($repo in $repos) {
     foreach ($group in $selectedGroups) {
 
         Write-Host "`nUpdating security settings for $($repo.name) for group $($group.name)..."
-        #Getting the group identity for descriptor
-        $groupIdentity = (Invoke-RestMethod -Uri "$($organization.accountUri)_apis/identities?subjectDescriptors=$($group.descriptor)&api-version=7.2-preview.1" -Headers $headers -Method Get).value
          
         $body.accessControlEntries += @{
-            descriptor = $groupIdentity.descriptor
+            descriptor = $group.identityDescriptor # Retrieved earlier for all groups
             allow      = $allowActions | ForEach-Object { $_.bit } | Measure-Object -Sum | Select-Object -ExpandProperty Sum
             deny       = $denyActions | ForEach-Object { $_.bit } | Measure-Object -Sum | Select-Object -ExpandProperty Sum
         }
