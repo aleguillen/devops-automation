@@ -7,7 +7,7 @@
 # Example with parameters:
 #> .\reporting-scripts\get-multi-org-report.ps1 -forceCSVExport -directoryPath ".\reports"
 
-Write-Host "Loading functions..."
+Write-Log "Loading functions..." 
 
 function Login-AzureCLI {
 
@@ -17,7 +17,7 @@ function Login-AzureCLI {
 
     $login = Read-Host "`nDo you need to login to Azure CLI? (Y/N)"
     if ($login.ToLower() -eq "y") {
-        Write-Host "Login to Azure CLI"
+        Write-Log "Login to Azure CLI" 
         az login --output none
     }
 
@@ -65,7 +65,8 @@ function Export-DataToCsv {
         else {
             $inputObject | Export-Csv -Path $filePath -Delimiter $delimiter -NoTypeInformation
         }
-        Write-Host -ForegroundColor Green "  [info] - Data exported to $filePath"
+
+        Write-Log "Data exported to $filePath" -verbose
     }
 }
 
@@ -127,4 +128,44 @@ function Calculate-FinalPermissions {
     }
 
     return ($permissions | Sort-Object -Property displayName)
+}
+
+enum LogType {
+    Info = 0
+    Warning = 1
+    Error = 2
+}
+
+function Write-Log {
+    param (
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)]
+        [string] $message,
+        [LogType] $logType = [LogType]::Info,
+        [string] $logDirectory = ".\logs",
+        [switch] $writeToLogFile
+    )
+
+    $logFile = $logDirectory + "\log-" + (Get-Date).ToString("yyyy-MM-dd") + ".txt"
+    
+    $logMessage = "$(Get-Date -Format "yyyy-MM-dd HH:mm:ss") - $($logType.ToString().ToUpper()) - $message"
+
+    switch ($logType) {
+        ([LogType]::Error) {  
+            Write-Error $logMessage 
+        }
+        ([LogType]::Warning) {  
+            Write-Warning $logMessage 
+        }
+        Default {
+            Write-Verbose $logMessage 
+        }
+    }
+
+    if ($writeToLogFile) {
+        if (-not (Test-Path -Path $logDirectory)) {
+            New-Item -ItemType Directory -Path $logDirectory
+        }
+
+        Add-Content -Path $logFile -Value $logMessage
+    }
 }

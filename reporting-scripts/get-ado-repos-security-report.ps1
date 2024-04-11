@@ -19,10 +19,13 @@
 
 # Example with parameter:
 # - Run the script with the following command to filter repositories by name:
-#   ./get-ado-repos-security-report.ps1 -repoStartsWith "MyRepo"
+#   ./get-ado-repos-security-report.ps1 -repoStartsWith "MyRepo" 
 
 param(
-    [string] $repoStartsWith = $null
+    [string] $repoStartsWith = $null,
+    [string] $directoryPath = ".\reports",
+    [switch] $verbose,
+    [switch] $writeToLogFile
 )
 
 $ErrorActionPreference = "Stop"
@@ -91,7 +94,7 @@ $securityNamespace = (Invoke-RestMethod -Uri "$($orgBaseUrl)_apis/securitynamesp
 $reposPermissions = @()
 foreach ($repo in $selectedRepos) {
 
-    Write-Host " - Current security settings for $($repo.name):"
+    Write-Log "Current security settings for $($repo.name):" -writeToLogFile:$writeToLogFile -verbose:$verbose
     $repoToken = "repoV2/$($repo.project.id)/$($repo.id)"
     $repoACLs = (Invoke-RestMethod -Uri "$($orgBaseUrl)_apis/accesscontrollists/$($securityNamespaceId)?token=$($repoToken)&includeExtendedInfo=true&recurse=true&api-version=7.2-preview.1" -Headers $headers -Method Get).value
 
@@ -103,18 +106,22 @@ foreach ($repo in $selectedRepos) {
     $repoACEsList = @()
     foreach ($ace in $repoACEs.Values) {
 
-        Write-Host "   - Checking descriptor: $($ace.descriptor)"
+        Write-Log "  Checking descriptor: $($ace.descriptor)" -writeToLogFile:$writeToLogFile -verbose:$verbose
 
         $identity = (Invoke-RestMethod -Uri "$($organization.accountUri)_apis/identities?descriptors=$($ace.descriptor)&api-version=7.2-preview.1" -Headers $headers -Method Get).value
         #$identity | ft providerDisplayName, descriptor
+        
+        Write-Log "    Display name: $($identity.providerDisplayName)" -writeToLogFile:$writeToLogFile -verbose:$verbose
         
         $allowActions = (Calculate-BitToActions -bit $ace.allow -actions $securityNamespace.actions)
         $denyActions = (Calculate-BitToActions -bit $ace.deny -actions $securityNamespace.actions)
         $effectiveAllowActions = (Calculate-BitToActions -bit $ace.extendedInfo.effectiveAllow -actions $securityNamespace.actions)
         $effectiveDenyActions = (Calculate-BitToActions -bit $ace.extendedInfo.effectiveDeny -actions $securityNamespace.actions)
-
+        
         $permissions = Calculate-FinalPermissions -actions $securityNamespace.actions -allowActions $allowActions -denyActions $denyActions -effectiveAllowActions $effectiveAllowActions -effectiveDenyActions $effectiveDenyActions
-        #$permissions | ft displayName, value -AutoSize
+        
+        $permissions | Select-Object displayName, value | ForEach-Object { Write-Log "      $($_.displayName): $($_.value)" -writeToLogFile:$writeToLogFile -verbose:$verbose }
+
         $repoACEsList += [PSCustomObject]@{
             projectId = $project.id
             projectName = $project.name
@@ -148,4 +155,4 @@ $reposPermissionsReport = $reposPermissionsReport | Select-Object -Property * -E
 
 $reposPermissionsReport | Select-Object -Property * -ExcludeProperty projectName,repositoryUrl | format-table  -AutoSize
 
-Export-DataToCsv -inputObject $reposPermissionsReport -fileName "repositories-security-report" -forceCSVExport
+Export-DataToCsv -inputObject $reposPermissionsReport -fileName "repositories-security-report" -directoryPath $directoryPath -forceCSVExport -delimiter "," 
