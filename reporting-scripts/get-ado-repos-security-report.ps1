@@ -92,6 +92,7 @@ $reposPermissions = @()
 foreach ($repo in $selectedRepos) {
 
     Write-Host " - Current security settings for $($repo.name):"
+    $repoToken = "repoV2/$($repo.project.id)/$($repo.id)"
     $repoACLs = (Invoke-RestMethod -Uri "$($orgBaseUrl)_apis/accesscontrollists/$($securityNamespaceId)?token=$($repoToken)&includeExtendedInfo=true&recurse=true&api-version=7.2-preview.1" -Headers $headers -Method Get).value
 
     $repoACEs = @{}
@@ -101,6 +102,9 @@ foreach ($repo in $selectedRepos) {
 
     $repoACEsList = @()
     foreach ($ace in $repoACEs.Values) {
+
+        Write-Host "   - Checking descriptor: $($ace.descriptor)"
+
         $identity = (Invoke-RestMethod -Uri "$($organization.accountUri)_apis/identities?descriptors=$($ace.descriptor)&api-version=7.2-preview.1" -Headers $headers -Method Get).value
         #$identity | ft providerDisplayName, descriptor
         

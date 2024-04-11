@@ -18,7 +18,7 @@ function Login-AzureCLI {
     $login = Read-Host "`nDo you need to login to Azure CLI? (Y/N)"
     if ($login.ToLower() -eq "y") {
         Write-Host "Login to Azure CLI"
-        az login
+        az login --output none
     }
 
     # Retrieve the access token
